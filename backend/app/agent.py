@@ -5,7 +5,7 @@ from langchain_community.tools import DuckDuckGoSearchRun
 from langgraph.prebuilt import create_react_agent
 
 
-def create_agent()  # 의도적 버그: 콜론(:) 제거
+def create_agent():
     """LangGraph React Agent를 생성합니다."""
     # Gemini LLM 모델 초기화
     llm = ChatGoogleGenerativeAI(
