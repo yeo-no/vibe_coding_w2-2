@@ -1,0 +1,89 @@
+name: GitHub 라벨 설정
+
+on:
+  workflow_dispatch:  # 수동 실행
+  repository_dispatch:
+    types: [setup-labels]
+
+jobs:
+  setup-labels:
+    name: GitHub 라벨 설정
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 기본 라벨 생성
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo } = context.repo;
+          
+          const labels = [
+            // 타입별 라벨
+            { name: 'bug', color: 'ee0701', description: '버그 및 오류' },
+            { name: 'enhancement', color: '0366d6', description: '새로운 기능 또는 개선사항' },
+            { name: 'documentation', color: '0052cc', description: '문서 관련' },
+            { name: 'question', color: 'cc317c', description: '질문 또는 도움 요청' },
+            { name: 'test', color: '5c6ac4', description: '테스트 관련' },
+            { name: 'refactor', color: 'fbca04', description: '코드 리팩토링' },
+            
+            // 우선순위 라벨
+            { name: 'priority-high', color: 'd93f0b', description: '높은 우선순위' },
+            { name: 'priority-medium', color: 'fbca04', description: '중간 우선순위' },
+            { name: 'priority-low', color: '0e8a16', description: '낮은 우선순위' },
+            
+            // 컴포넌트별 라벨
+            { name: 'backend', color: '1d76db', description: 'Backend 관련' },
+            { name: 'frontend', color: 'ff6b6b', description: 'Frontend 관련' },
+            { name: 'agent', color: '6f42c1', description: 'AI Agent 관련' },
+            
+            // 상태 라벨
+            { name: 'good first issue', color: '7057ff', description: '초보자에게 적합한 이슈' },
+            { name: 'help wanted', color: '008672', description: '도움이 필요한 이슈' },
+            { name: 'urgent', color: 'b60205', description: '긴급 처리 필요' },
+            { name: 'stale', color: '6c757d', description: '오래된 이슈' },
+            
+            // PR 크기 라벨
+            { name: 'size/XS', color: '3cbf00', description: '매우 작은 변경 (≤10줄)' },
+            { name: 'size/S', color: '5d9c59', description: '작은 변경 (≤100줄)' },
+            { name: 'size/M', color: 'a2eeef', description: '중간 변경 (≤500줄)' },
+            { name: 'size/L', color: 'ffd33d', description: '큰 변경 (≤1000줄)' },
+            { name: 'size/XL', color: 'ee0701', description: '매우 큰 변경 (>1000줄)' },
+            
+            // 추가 분류 라벨
+            { name: 'duplicate', color: 'd4c5f9', description: '중복된 이슈' },
+            { name: 'wontfix', color: 'ffffff', description: '수정하지 않을 이슈' },
+            { name: 'invalid', color: 'e6e6e6', description: '유효하지 않은 이슈' },
+          ];
+          
+          for (const label of labels) {
+            try {
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name: label.name,
+                color: label.color,
+                description: label.description
+              });
+              console.log(`라벨 생성 완료: ${label.name}`);
+            } catch (error) {
+              if (error.status === 422) {
+                // 이미 존재하는 라벨인 경우 업데이트
+                try {
+                  await github.rest.issues.updateLabel({
+                    owner,
+                    repo,
+                    name: label.name,
+                    color: label.color,
+                    description: label.description
+                  });
+                  console.log(`라벨 업데이트 완료: ${label.name}`);
+                } catch (updateError) {
+                  console.log(`라벨 업데이트 실패: ${label.name} - ${updateError.message}`);
+                }
+              } else {
+                console.log(`라벨 생성 실패: ${label.name} - ${error.message}`);
+              }
+            }
+          }
+          
+          console.log('모든 라벨 설정 완료!'); 

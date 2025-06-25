@@ -1,0 +1,188 @@
+name: 이슈 자동화
+
+on:
+  issues:
+    types: [opened, edited, labeled, assigned, reopened, closed]
+  issue_comment:
+    types: [created]
+
+jobs:
+  issue-welcome:
+    name: 이슈 환영 댓글
+    runs-on: ubuntu-latest
+    if: github.event.action == 'opened'
+    
+    steps:
+    - name: 이슈 오픈 환영 댓글
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo, number } = context.issue;
+          const issueType = context.payload.issue.title;
+          
+          let welcomeMessage = `
+          🎉 **새로운 이슈를 생성해주셔서 감사합니다!**
+          
+          ## 📋 이슈 처리 안내
+          `;
+          
+          // 이슈 타입에 따른 맞춤형 메시지
+          if (issueType.includes('[BUG]')) {
+            welcomeMessage += `
+            🐛 **버그 리포트**를 접수했습니다.
+            
+            - 담당자가 곧 배정될 예정입니다
+            - 재현 가능한 최소한의 예제를 제공해주시면 빠른 해결에 도움이 됩니다
+            - 환경 정보와 스크린샷이 있다면 더욱 좋습니다
+            `;
+          } else if (issueType.includes('[FEATURE]')) {
+            welcomeMessage += `
+            ✨ **기능 요청**을 접수했습니다.
+            
+            - 제품 팀에서 검토 후 우선순위를 결정할 예정입니다
+            - 사용 사례와 구체적인 요구사항을 자세히 설명해주시면 좋습니다
+            - 디자인 가이드라인이나 참고 자료가 있다면 공유해주세요
+            `;
+          } else {
+            welcomeMessage += `
+            📝 **일반 이슈**를 접수했습니다.
+            
+            - 이슈 타입에 맞는 라벨이 자동으로 설정됩니다
+            - 필요에 따라 담당자가 배정될 예정입니다
+            `;
+          }
+          
+          welcomeMessage += `
+          
+          ## 🏷️ 자동화 안내
+          - ✅ 이슈 타입에 따라 자동으로 라벨이 설정됩니다
+          - ✅ 우선순위가 자동으로 평가됩니다
+          - ✅ 적절한 담당자가 배정됩니다
+          
+          빠른 시일 내에 답변드릴 수 있도록 노력하겠습니다! 😊
+          `;
+          
+          await github.rest.issues.createComment({
+            owner,
+            repo,
+            issue_number: number,
+            body: welcomeMessage
+          });
+
+  issue-auto-label:
+    name: 이슈 자동 라벨링
+    runs-on: ubuntu-latest
+    if: github.event.action == 'opened' || github.event.action == 'edited'
+    
+    steps:
+    - name: 이슈 제목 및 내용 기반 자동 라벨링
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo, number } = context.issue;
+          const title = context.payload.issue.title;
+          const body = context.payload.issue.body || '';
+          
+          let labels = [];
+          
+          // 제목 기반 라벨링
+          if (title.includes('[BUG]')) {
+            labels.push('bug');
+          }
+          if (title.includes('[FEATURE]')) {
+            labels.push('enhancement');
+          }
+          if (title.includes('[QUESTION]')) {
+            labels.push('question');
+          }
+          if (title.includes('[DOCS]')) {
+            labels.push('documentation');
+          }
+          
+          // 내용 기반 라벨링
+          const content = (title + ' ' + body).toLowerCase();
+          
+          if (content.includes('backend') || content.includes('api')) {
+            labels.push('backend');
+          }
+          if (content.includes('frontend') || content.includes('ui')) {
+            labels.push('frontend');
+          }
+          if (content.includes('agent') || content.includes('ai')) {
+            labels.push('agent');
+          }
+          
+          // 우선순위 설정
+          if (content.includes('urgent') || content.includes('critical')) {
+            labels.push('priority-high');
+          } else if (content.includes('improvement')) {
+            labels.push('priority-low');
+          } else {
+            labels.push('priority-medium');
+          }
+          
+          // 중복 제거
+          labels = [...new Set(labels)];
+          
+          if (labels.length > 0) {
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: number,
+              labels: labels
+            });
+          }
+
+  issue-auto-assign:
+    name: 이슈 자동 할당
+    runs-on: ubuntu-latest
+    if: github.event.action == 'labeled'
+    
+    steps:
+    - name: 라벨 기반 자동 할당
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo, number } = context.issue;
+          const { data: issue } = await github.rest.issues.get({
+            owner,
+            repo,
+            issue_number: number
+          });
+          
+          const labels = issue.labels.map(label => label.name);
+          let assignees = [];
+          
+          // 라벨 기반 할당 규칙 (실제 GitHub 아이디로 변경 필요)
+          if (labels.includes('backend')) {
+            assignees.push('backend-maintainer');
+          }
+          if (labels.includes('frontend')) {
+            assignees.push('frontend-maintainer');
+          }
+          if (labels.includes('agent')) {
+            assignees.push('ai-specialist');
+          }
+          
+          // 중복 제거
+          assignees = [...new Set(assignees)];
+          
+          if (assignees.length > 0) {
+            try {
+              await github.rest.issues.addAssignees({
+                owner,
+                repo,
+                issue_number: number,
+                assignees: assignees
+              });
+              
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: number,
+                body: `🎯 **자동 할당 완료** \n\n담당자: ${assignees.map(a => `@${a}`).join(', ')}`
+              });
+            } catch (error) {
+              console.log(`할당 실패: ${error.message}`);
+            }
+          } 

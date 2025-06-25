@@ -1,0 +1,325 @@
+name: PR 자동화
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, assigned, labeled]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  pr-comment:
+    name: PR 자동 댓글
+    runs-on: ubuntu-latest
+    if: github.event.action == 'opened'
+    
+    steps:
+    - name: PR 오픈 환영 댓글
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo, number } = context.issue;
+          const welcomeMessage = `
+          🎉 **새로운 Pull Request를 열어주셔서 감사합니다!**
+          
+          ## 📋 체크리스트
+          PR 작성자는 다음 사항들을 확인해주세요:
+          
+          - [ ] 코드 리뷰 요청 완료
+          - [ ] 관련 이슈 링크 추가 (해당하는 경우)
+          - [ ] 테스트 코드 작성 완료
+          - [ ] 문서 업데이트 완료 (해당하는 경우)
+          - [ ] 로컬에서 모든 테스트 통과 확인
+          
+          ## 🚀 자동화된 검사
+          - ✅ CI/CD 파이프라인이 자동으로 실행됩니다
+          - ✅ 코드 품질 검사가 진행됩니다
+          - ✅ 테스트 커버리지가 측정됩니다
+          
+          리뷰어가 배정되면 코드 리뷰가 진행됩니다. 궁금한 점이 있으면 언제든 코멘트 남겨주세요! 😊
+          `;
+          
+          await github.rest.issues.createComment({
+            owner,
+            repo,
+            issue_number: number,
+            body: welcomeMessage
+          });
+
+  pr-auto-assign:
+    name: PR 자동 할당
+    runs-on: ubuntu-latest
+    if: github.event.action == 'opened'
+    
+    steps:
+    - name: 파일 변경 내용 확인 및 자동 할당
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo, number } = context.issue;
+          
+          // PR의 변경된 파일 목록 가져오기
+          const { data: files } = await github.rest.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: number
+          });
+          
+          const changedFiles = files.map(file => file.filename);
+          let assignees = [];
+          let reviewers = [];
+          
+          // 파일 경로에 따른 자동 할당 규칙
+          const backendChanged = changedFiles.some(file => file.startsWith('backend/'));
+          const frontendChanged = changedFiles.some(file => file.startsWith('frontend/'));
+          const docsChanged = changedFiles.some(file => file.startsWith('docs/') || file.includes('README') || file.includes('.md'));
+          const testChanged = changedFiles.some(file => file.includes('test') || file.includes('spec'));
+          
+          // 기본 리뷰어 설정 (실제 팀원 GitHub 아이디로 변경 필요)
+          if (backendChanged) {
+            reviewers.push('backend-reviewer'); // 실제 GitHub 아이디로 변경 필요
+          }
+          if (frontendChanged) {
+            reviewers.push('frontend-reviewer'); // 실제 GitHub 아이디로 변경 필요
+          }
+          if (testChanged) {
+            reviewers.push('test-reviewer'); // 실제 GitHub 아이디로 변경 필요
+          }
+          
+          // PR 작성자가 아닌 경우에만 할당
+          const prAuthor = context.payload.pull_request.user.login;
+          reviewers = reviewers.filter(reviewer => reviewer !== prAuthor);
+          
+          if (reviewers.length > 0) {
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner,
+                repo,
+                pull_number: number,
+                reviewers: reviewers
+              });
+              
+              console.log(`리뷰어 할당 완료: ${reviewers.join(', ')}`);
+            } catch (error) {
+              console.log(`리뷰어 할당 실패: ${error.message}`);
+              // 실패해도 워크플로우는 계속 진행
+            }
+          }
+
+  pr-auto-label:
+    name: PR 자동 라벨링
+    runs-on: ubuntu-latest
+    if: github.event.action == 'opened' || github.event.action == 'synchronize'
+    
+    steps:
+    - name: 체크아웃
+      uses: actions/checkout@v4
+      
+    - name: PR 제목 및 파일 변경 기반 자동 라벨링
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo, number } = context.issue;
+          const title = context.payload.pull_request.title;
+          
+          // PR의 변경된 파일 목록 가져오기
+          const { data: files } = await github.rest.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: number
+          });
+          
+          const changedFiles = files.map(file => file.filename);
+          let labels = [];
+          
+          // 제목 기반 라벨링
+          if (title.includes('[FEAT]') || title.includes('[FEATURE]')) {
+            labels.push('enhancement');
+          }
+          if (title.includes('[FIX]') || title.includes('[BUG]')) {
+            labels.push('bug');
+          }
+          if (title.includes('[DOCS]') || title.includes('[DOC]')) {
+            labels.push('documentation');
+          }
+          if (title.includes('[TEST]')) {
+            labels.push('test');
+          }
+          if (title.includes('[REFACTOR]')) {
+            labels.push('refactor');
+          }
+          if (title.includes('[URGENT]') || title.includes('[HOTFIX]')) {
+            labels.push('urgent');
+          }
+          
+          // 파일 경로 기반 라벨링
+          const backendChanged = changedFiles.some(file => file.startsWith('backend/'));
+          const frontendChanged = changedFiles.some(file => file.startsWith('frontend/'));
+          const docsChanged = changedFiles.some(file => file.startsWith('docs/') || file.includes('README') || file.includes('.md'));
+          const testChanged = changedFiles.some(file => file.includes('test') || file.includes('spec'));
+          const agentChanged = changedFiles.some(file => file.includes('agent') || file.includes('langgraph'));
+          
+          if (backendChanged) labels.push('backend');
+          if (frontendChanged) labels.push('frontend');
+          if (docsChanged) labels.push('documentation');
+          if (testChanged) labels.push('test');
+          if (agentChanged) labels.push('agent');
+          
+          // 중복 제거
+          labels = [...new Set(labels)];
+          
+          if (labels.length > 0) {
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: number,
+              labels: labels
+            });
+            
+            console.log(`라벨 추가 완료: ${labels.join(', ')}`);
+          }
+
+  pr-code-review:
+    name: PR 자동 코드 리뷰
+    runs-on: ubuntu-latest
+    if: github.event.action == 'opened' || github.event.action == 'synchronize'
+    
+    steps:
+    - name: 체크아웃
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Python 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+        
+    - name: 코드 품질 분석 도구 설치
+      run: |
+        pip install flake8 pylint bandit safety
+        
+    - name: 코드 품질 분석 실행
+      run: |
+        # Flake8 검사
+        echo "## 🔍 코드 품질 분석 결과" > code_review.md
+        echo "" >> code_review.md
+        
+        echo "### Flake8 분석" >> code_review.md
+        if flake8 backend/ --max-line-length=127 --exclude=venv --format='%(path)s:%(row)d:%(col)d: %(code)s %(text)s' > flake8_results.txt 2>&1; then
+          echo "✅ Flake8 검사 통과" >> code_review.md
+        else
+          echo "❌ Flake8 검사 실패" >> code_review.md
+          echo '```' >> code_review.md
+          cat flake8_results.txt >> code_review.md
+          echo '```' >> code_review.md
+        fi
+        
+        echo "" >> code_review.md
+        echo "### Bandit 보안 분석" >> code_review.md
+        if bandit -r backend/ -f txt > bandit_results.txt 2>&1; then
+          echo "✅ 보안 검사 통과" >> code_review.md
+        else
+          echo "⚠️ 보안 이슈 발견" >> code_review.md
+          echo '```' >> code_review.md
+          tail -20 bandit_results.txt >> code_review.md
+          echo '```' >> code_review.md
+        fi
+        
+        echo "" >> code_review.md
+        echo "---" >> code_review.md
+        echo "🤖 **자동 코드 리뷰 봇**이 생성한 리포트입니다." >> code_review.md
+        echo "상세한 내용은 CI 로그를 확인해주세요." >> code_review.md
+      continue-on-error: true
+        
+    - name: 코드 리뷰 댓글 추가
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const { owner, repo, number } = context.issue;
+          
+          let reviewComment = '';
+          try {
+            reviewComment = fs.readFileSync('code_review.md', 'utf8');
+          } catch (error) {
+            reviewComment = '🤖 자동 코드 리뷰를 실행할 수 없었습니다. CI 로그를 확인해주세요.';
+          }
+          
+          await github.rest.issues.createComment({
+            owner,
+            repo,
+            issue_number: number,
+            body: reviewComment
+          });
+
+  pr-size-check:
+    name: PR 크기 확인
+    runs-on: ubuntu-latest
+    if: github.event.action == 'opened' || github.event.action == 'synchronize'
+    
+    steps:
+    - name: PR 크기 라벨링
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { owner, repo, number } = context.issue;
+          
+          const { data: pr } = await github.rest.pulls.get({
+            owner,
+            repo,
+            pull_number: number
+          });
+          
+          const additions = pr.additions;
+          const deletions = pr.deletions;
+          const changedLines = additions + deletions;
+          
+          // 기존 크기 라벨 제거
+          const sizeLabels = ['size/XS', 'size/S', 'size/M', 'size/L', 'size/XL'];
+          const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+            owner,
+            repo,
+            issue_number: number
+          });
+          
+          for (const label of labels) {
+            if (sizeLabels.includes(label.name)) {
+              await github.rest.issues.removeLabel({
+                owner,
+                repo,
+                issue_number: number,
+                name: label.name
+              });
+            }
+          }
+          
+          // 새로운 크기 라벨 추가
+          let sizeLabel = '';
+          if (changedLines <= 10) {
+            sizeLabel = 'size/XS';
+          } else if (changedLines <= 100) {
+            sizeLabel = 'size/S';
+          } else if (changedLines <= 500) {
+            sizeLabel = 'size/M';
+          } else if (changedLines <= 1000) {
+            sizeLabel = 'size/L';
+          } else {
+            sizeLabel = 'size/XL';
+          }
+          
+          await github.rest.issues.addLabels({
+            owner,
+            repo,
+            issue_number: number,
+            labels: [sizeLabel]
+          });
+          
+          // 대용량 PR에 대한 경고 댓글
+          if (changedLines > 1000) {
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: number,
+              body: `⚠️ **대용량 PR 감지** \n\n이 PR은 ${changedLines}줄의 변경사항을 포함하고 있습니다. 리뷰의 효율성을 위해 더 작은 단위로 분할하는 것을 고려해보세요.`
+            });
+          } 
